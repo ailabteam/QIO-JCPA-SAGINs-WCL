@@ -1,6 +1,6 @@
 # ==============================================================================
 # File: qubo_mapping.py
-# Mô tả: Thiết lập mô hình NTN cơ sở và xây dựng ma trận QUBO Q (32x32)
+# Mô tả: Thiết lập mô hình NTN cơ sở và xây dựng ma trận QUBO Q (20x20)
 # ==============================================================================
 import numpy as np
 import itertools
@@ -167,9 +167,9 @@ if __name__ == "__main__":
 
     # 3. Lưu ma trận Q vào file (quan trọng cho bước tiếp theo)
     # Chúng ta dùng định dạng NumPy binary để lưu chính xác các giá trị float
-    np.save('qubo_matrix_Q_32x32.npy', Q_matrix)
+    np.save('qubo_matrix_Q_20x20.npy', Q_matrix)
 
-    print("\nMa trận QUBO Q đã được lưu vào 'qubo_matrix_Q_32x32.npy'")
+    print("\nMa trận QUBO Q đã được lưu vào 'qubo_matrix_Q_20x20.npy'")
     print("Vui lòng kiểm tra các giá trị lớn (Penalty) và nhỏ (Benefit).")
 
     # (Tùy chọn) In một phần ma trận để kiểm tra
@@ -178,5 +178,5 @@ if __name__ == "__main__":
     print(df_Q)
 
 # Thao tác Git tiếp theo:
-# 1. Thêm file qubo_mapping.py và qubo_matrix_Q_32x32.npy
+# 1. Thêm file qubo_mapping.py và qubo_matrix_Q_20x20.npy
 # 2. Commit và Push lên GitHub.

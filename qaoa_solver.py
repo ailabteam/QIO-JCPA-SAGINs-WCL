@@ -1,18 +1,36 @@
 # ==============================================================================
 # File: qaoa_solver.py
-# Mô tả: Triển khai thuật toán QAOA p=2 trên ma trận QUBO 32x32.
+# Mô tả: Triển khai thuật toán QAOA p=2 trên ma trận QUBO 20x20.
 # ==============================================================================
 import pennylane as qml
 from pennylane import numpy as pnp
 import numpy as np
 import torch
 import time
+import logging # <-- Import thư viện logging
+
+
+# --- CẤU HÌNH LOGGING ---
+LOG_FILENAME = 'qaoa_run.log'
+logging.basicConfig(filename=LOG_FILENAME, level=logging.INFO, 
+                    format='%(asctime)s - %(levelname)s - %(message)s')
+# Thêm console handler để in ra màn hình
+console = logging.StreamHandler()
+console.setLevel(logging.INFO)
+formatter = logging.Formatter('%(message)s')
+console.setFormatter(formatter)
+
+# Chỉ thêm console handler nếu nó chưa được thêm
+if not logging.getLogger().hasHandlers():
+    logging.getLogger().addHandler(console)
 
 # --- 1. Cấu hình Hệ thống ---
 N_QUBITS = 20
 QAOA_P = 2  # Độ sâu của QAOA (p=2 là lựa chọn tối ưu cho Letter)
 N_ITERATIONS = 500 # Số lần lặp tối ưu hóa
 LEARNING_RATE = 0.01
+CHECKPOINT_INTERVAL = 100 # Lưu checkpoint sau mỗi 100 bước
+
 
 # Thiết lập Device (sử dụng lightning.qubit để tận dụng hiệu suất C++ / GPU)
 # Cần kiểm tra xem lightning.qubit có dùng GPU tự động qua PyTorch không
@@ -103,46 +121,58 @@ def qaoa_circuit(gamma, beta, H_C, H_M):
 # --- 4. Chức năng Lập trình Chính ---
 
 def run_qaoa_optimization(Q_matrix, N_ITERATIONS):
-    """Chạy quá trình tối ưu hóa tham số QAOA."""
-
+    logging.info(f"--- Bắt đầu Tối ưu hóa QAOA (p={QAOA_P}, Q={N_QUBITS}) ---")
+    
     H_C, H_M = build_qaoa_hamiltonian(Q_matrix)
+    
+    # Khởi tạo tham số
+    # Sử dụng torch.nn.Parameter để dễ dàng lưu/load trạng thái
+    params_init = torch.nn.Parameter(torch.rand(2 * QAOA_P))
 
-    # Khởi tạo tham số (ngẫu nhiên)
-    # 2p tham số: p gamma (cost) và p beta (mixer)
-    params_init = torch.rand(2 * QAOA_P, requires_grad=True)
-
-    # Sử dụng PyTorch Optimizer (Adam)
     opt = torch.optim.Adam([params_init], lr=LEARNING_RATE)
-
-    # Log dữ liệu
+    
     history = {'iteration': [], 'cost': [], 'params': []}
-
-    print(f"\n--- Bắt đầu Tối ưu hóa QAOA (p={QAOA_P}) ---")
     start_time = time.time()
-
+    
     for step in range(1, N_ITERATIONS + 1):
-        # Phân tách params thành gamma và beta
         gamma = params_init[:QAOA_P]
         beta = params_init[QAOA_P:]
+        
+        # Cập nhật Cost
+        try:
+            cost = qaoa_circuit(gamma, beta, H_C, H_M)
+            
+            opt.zero_grad()
+            cost.backward()
+            opt.step()
+            
+            # Ghi Log và Console Output
+            current_cost = cost.item()
+            history['iteration'].append(step)
+            history['cost'].append(current_cost)
+            history['params'].append(params_init.detach().numpy())
 
-        # Tính toán chi phí (Cost Function = Expectation Value of H_C)
-        cost = qaoa_circuit(gamma, beta, H_C, H_M)
+            if step % 10 == 0 or step == 1: # Log thường xuyên hơn
+                logging.info(f"Step {step}/{N_ITERATIONS} | Cost: {current_cost:.6f}")
 
-        # Tối ưu hóa
-        opt.zero_grad()
-        cost.backward()
-        opt.step()
+            # Checkpointing (Lưu trạng thái tối ưu hóa trung gian)
+            if step % CHECKPOINT_INTERVAL == 0:
+                torch.save({
+                    'step': step,
+                    'params': params_init.state_dict(),
+                    'optimizer_state': opt.state_dict(),
+                }, 'qaoa_checkpoint.pth')
+                logging.info(f"Checkpoint saved at step {step}.")
+                
+        except Exception as e:
+            # Nếu xảy ra lỗi giữa chừng, log và thoát
+            logging.error(f"Error at step {step}: {e}")
+            break
 
-        # Lưu Log
-        history['iteration'].append(step)
-        history['cost'].append(cost.item())
-        history['params'].append(params_init.detach().numpy())
-
-        if step % 50 == 0 or step == 1:
-            print(f"Step {step}/{N_ITERATIONS} | Chi phí (Cost): {cost.item():.6f}")
 
     end_time = time.time()
-    print(f"\nOptimization Finished in {end_time - start_time:.2f} seconds.")
+    logging.info(f"\nOptimization Finished in {end_time - start_time:.2f} seconds.")
+
 
     # 5. Lấy kết quả tối ưu và vector x tối ưu
 
@@ -170,30 +200,24 @@ def run_qaoa_optimization(Q_matrix, N_ITERATIONS):
 
 
 if __name__ == "__main__":
-    # Load ma trận Q đã tính toán trước đó
+    # Load ma trận Q 
     try:
-        Q_matrix = np.load('qubo_matrix_Q_32x32.npy')
+        Q_matrix = np.load('qubo_matrix_Q_20x20.npy')
     except FileNotFoundError:
-        print("Lỗi: Không tìm thấy 'qubo_matrix_Q_32x32.npy'. Vui lòng chạy qubo_mapping.py trước.")
+        logging.error("Lỗi: Không tìm thấy 'qubo_matrix_Q_20x20.npy'.")
         exit()
-
+        
     # Chạy Tối ưu hóa QAOA
     optimal_x_qaoa, history, H_C_constant = run_qaoa_optimization(Q_matrix, N_ITERATIONS)
-
-    print("\n--- Kết quả QAOA ---")
-    print(f"Vector Phân bổ Kênh Tối ưu (x): \n{optimal_x_qaoa}")
-
-    # Tính chi phí thực tế (Minimum Energy)
-    # H_C = x^T Q x + Constant
-    # Chuyển x_i = (1 - Z_i)/2, Z_i = 1 - 2x_i
-    # Chi phí QUBO = x^T Q x
-
+    
+    logging.info("\n--- Kết quả QAOA ---")
+    logging.info(f"Vector Phân bổ Kênh Tối ưu (x): \n{optimal_x_qaoa}")
+    
     qubo_cost = optimal_x_qaoa @ Q_matrix @ optimal_x_qaoa.T
-
-    print(f"Chi phí QUBO tối thiểu tìm được (x^T Q x): {qubo_cost:.2f}")
-
-    # Lưu Log lịch sử hội tụ
+    logging.info(f"Chi phí QUBO tối thiểu tìm được (x^T Q x): {qubo_cost:.2f}")
+    
+    # Lưu Log lịch sử hội tụ cuối cùng
     df_history = pd.DataFrame(history)
     df_history.to_csv('qaoa_history_p2.log', index=False)
+    logging.info("Lịch sử hội tụ QAOA đã được lưu vào 'qaoa_history_p2.log'.")
 
-    print("\nLịch sử hội tụ QAOA đã được lưu vào 'qaoa_history_p2.log'.")
