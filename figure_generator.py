@@ -1,4 +1,3 @@
-# ==============================================================================
 # File: figure_generator.py
 # Mô tả: Thu thập dữ liệu cho Fig 1 (Scale) và Fig 2 (Convergence) + Bảng CSV.
 # ==============================================================================
@@ -125,7 +124,7 @@ def generate_figures(df_mean, df_raw):
 
     plt.xlabel('System Scale (Number of Qubits)')
     plt.ylabel('Achieved Sum Rate (nats/s/Hz)')
-    plt.title('Figure 1: Solution Quality vs. System Scale')
+    plt.title('Solution Quality vs. System Scale')
     plt.grid(True, linestyle='--')
     plt.legend()
     plt.tight_layout()
@@ -155,7 +154,7 @@ def generate_figures(df_mean, df_raw):
     plt.xscale('log') # Thường dùng log scale cho Runtime
     plt.xlabel('Total Runtime (ms) [Log Scale]')
     plt.ylabel('Solution Quality (% of ICA Optimum)')
-    plt.title('Figure 2: Quality vs. Runtime Trade-off (20 Qubits)')
+    plt.title('Quality vs. Runtime Trade-off (20 Qubits)')
     plt.grid(True, which="both", ls="--", alpha=0.6)
     plt.tight_layout()
     plt.savefig('figure2_tradeoff_runtime.pdf')
