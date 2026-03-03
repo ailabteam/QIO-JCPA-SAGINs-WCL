@@ -92,7 +92,8 @@ if __name__ == "__main__":
 
         print(f"  QIO    Rate: {rate_qio:.3f} | Time: {t_qio:.1f} ms")
         print(f"  Greedy Rate: {rate_gry:.3f} | Time: {t_gry:.1f} ms")
-		print(f" -> QIO Sum-Rate Improvement: {((rate_qio - rate_gry)/rate_gry)*100:+.2f}%")
-
+        print(f" -> QIO Sum-Rate Improvement: {((rate_qio - rate_gry)/rate_gry)*100:+.2f}%")
+        
+        
 
     print("\nHOÀN THÀNH TẤT CẢ MÔ PHỎNG CHO BÀI BÁO!")
