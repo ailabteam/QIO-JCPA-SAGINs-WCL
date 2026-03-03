@@ -12,23 +12,28 @@ from classical_optimization import solve_qubo_and_calculate_rate
 
 # --- CẤU HÌNH THỰC NGHIỆM ---
 N_USERS_SCALES = [4, 8, 12, 16] 
-NUM_SEEDS = 10  # Chạy 10 seeds để lấy trung bình (chuẩn IEEE)
+NUM_SEEDS = 10  # Chuẩn IEEE: Trung bình trên 10 realizations
 
-def robust_qih_solver(Q_mat, n_users):
+def robust_qih_solver(Q_mat, n_users, reads):
+    """Giải QUBO với số reads tùy chỉnh để giả lập Proposed vs Optimal"""
     bqm = {(i, j): Q_mat[i, j] for i in range(Q_mat.shape[0]) for j in range(i, Q_mat.shape[1])}
     sampler = neal.SimulatedAnnealingSampler()
-    # Tăng num_reads lên một chút để đảm bảo chất lượng khi mạng lớn
-    response = sampler.sample_qubo(bqm, num_reads=500)
     
-    # Tìm nghiệm hợp lệ (Mỗi user đúng 1 link)
+    # Giải bài toán
+    response = sampler.sample_qubo(bqm, num_reads=reads)
+    
+    # Tìm nghiệm hợp lệ đầu tiên (Mỗi user đúng 1 link) trong tập kết quả
     for sample in response.samples():
         x_vec = [sample[i] for i in range(Q_mat.shape[0])]
         x_mat = np.array(x_vec).reshape(N_TRANS, n_users)
         if np.all(np.sum(x_mat, axis=0) == 1):
             return x_vec
+            
+    # Nếu không tìm thấy nghiệm hợp lệ, lấy nghiệm có năng lượng thấp nhất
     return [response.first.sample[i] for i in range(Q_mat.shape[0])]
 
 def greedy_solver(G_matrix, n_users):
+    """Thuật toán tham lam (Baseline)"""
     x_gry = np.zeros((N_TRANS, n_users), dtype=int)
     for u in range(n_users):
         t_best = np.argmax(G_matrix[:, u])
@@ -36,51 +41,68 @@ def greedy_solver(G_matrix, n_users):
     return x_gry.flatten().tolist()
 
 if __name__ == "__main__":
-    print(f"BẮT ĐẦU CHẠY THỰC NGHIỆM TỔNG THỂ ({NUM_SEEDS} SEEDS PER SCALE)")
-    print(f"Hệ thống: {N_TRANS} Transmitters.")
+    print(f"BẮT ĐẦU CHẠY THỰC NGHIỆM CHỐT (PROPOSED vs OPTIMAL vs GREEDY)")
+    print(f"Hệ thống: {N_TRANS} Transmitters. Seeds: {NUM_SEEDS}")
     
     results_list = []
 
     for n_u in N_USERS_SCALES:
-        print(f"\n>>> Đang chạy quy mô: {n_u} Users ({n_u * N_TRANS} Qubits)...")
+        print(f"\n>>> Đang quy mô: {n_u} Users ({n_u * N_TRANS} Qubits)...")
         
-        scale_rates_qio = []
-        scale_rates_gry = []
-        scale_times_qio = []
+        # Các list để lưu kết quả của 10 seeds
+        r_qio_list, r_opt_list, r_gry_list = [], [], []
+        t_qio_list, t_opt_list, t_gry_list = [], [], []
         
         for s in range(NUM_SEEDS):
-            current_seed = 100 + s # Dùng các seed khác nhau
+            current_seed = 200 + s # Dùng dải seed mới cho sạch dữ liệu
             G, Q = run_snapshot_mapping(n_u, seed=current_seed)
             
-            # Giải bằng QIO
-            r_qio, t_qio, _ = solve_qubo_and_calculate_rate(Q, G, n_u, lambda mat: robust_qih_solver(mat, n_u))
+            # 1. Proposed QIO (Fast - 500 reads)
+            rate_qio, time_qio, _ = solve_qubo_and_calculate_rate(Q, G, n_u, lambda mat: robust_qih_solver(mat, n_u, 500))
             
-            # Giải bằng Greedy
-            r_gry, t_gry, _ = solve_qubo_and_calculate_rate(Q, G, n_u, lambda mat: greedy_solver(G, n_u))
+            # 2. Near-Optimal Proxy (Slow - 5000 reads) - Đây là mốc 100%
+            rate_opt, time_opt, _ = solve_qubo_and_calculate_rate(Q, G, n_u, lambda mat: robust_qih_solver(mat, n_u, 5000))
             
-            scale_rates_qio.append(r_qio)
-            scale_rates_gry.append(r_gry)
-            scale_times_qio.append(t_qio)
+            # 3. Greedy Baseline
+            rate_gry, time_gry, _ = solve_qubo_and_calculate_rate(Q, G, n_u, lambda mat: greedy_solver(G, n_u))
+            
+            r_qio_list.append(rate_qio)
+            r_opt_list.append(rate_opt)
+            r_gry_list.append(rate_gry)
+            t_qio_list.append(time_qio)
+            t_opt_list.append(time_opt)
+            t_gry_list.append(time_gry)
             
             if (s+1) % 2 == 0:
-                print(f"   - Seed {current_seed} xong.")
+                print(f"   - Seed {s+1}/{NUM_SEEDS} hoàn thành.")
 
-        # Tính trung bình cho mỗi quy mô
+        # Tính trung bình và Optimality Gap
+        mean_qio = np.mean(r_qio_list)
+        mean_opt = np.mean(r_opt_list)
+        mean_gry = np.mean(r_gry_list)
+        
+        # Tránh chia cho 0 nếu có lỗi
+        opt_gap = ((mean_opt - mean_qio) / mean_opt * 100) if mean_opt > 0 else 0
+        gain_vs_gry = ((mean_qio - mean_gry) / mean_gry * 100) if mean_gry > 0 else 0
+
         results_list.append({
             'Users': n_u,
             'Qubits': n_u * N_TRANS,
-            'SumRate_QIO_Mean': np.mean(scale_rates_qio),
-            'SumRate_GRY_Mean': np.mean(scale_rates_gry),
-            'Runtime_QIO_ms': np.mean(scale_times_qio),
-            'Improvement_Pct': ((np.mean(scale_rates_qio) - np.mean(scale_rates_gry)) / np.mean(scale_rates_gry)) * 100
+            'Rate_QIO': mean_qio,
+            'Rate_Optimal': mean_opt,
+            'Rate_Greedy': mean_gry,
+            'Time_QIO_ms': np.mean(t_qio_list),
+            'Time_Optimal_ms': np.mean(t_opt_list),
+            'Optimality_Gap_Pct': opt_gap,
+            'Gain_vs_Greedy_Pct': gain_vs_gry
         })
 
-    # Lưu kết quả ra CSV để vẽ hình
+    # Lưu kết quả
     df = pd.DataFrame(results_list)
-    df.to_csv('final_paper_data.csv', index=False)
+    df.to_csv('final_paper_results_with_gap.csv', index=False)
     
-    print("\n" + "="*50)
-    print("KẾT QUẢ CUỐI CÙNG (ĐÃ LẤY TRUNG BÌNH)")
-    print("="*50)
-    print(df[['Users', 'SumRate_QIO_Mean', 'SumRate_GRY_Mean', 'Improvement_Pct', 'Runtime_QIO_ms']])
-    print("\nĐã lưu số liệu sạch vào file: final_paper_data.csv")
+    print("\n" + "="*80)
+    print("KẾT QUẢ CUỐI CÙNG CHO BẢN THẢO (IEEE REVISION)")
+    print("="*80)
+    print(df[['Users', 'Rate_Optimal', 'Rate_QIO', 'Rate_Greedy', 'Optimality_Gap_Pct', 'Gain_vs_Greedy_Pct', 'Time_QIO_ms']])
+    print("\nSố liệu đã lưu vào: final_paper_results_with_gap.csv")
