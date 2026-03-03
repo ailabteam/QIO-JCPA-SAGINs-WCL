@@ -1,58 +1,71 @@
 import numpy as np
 import itertools
 import time
-# TODO: Import hàm tính Sum Rate và Power Allocation từ file của bạn
-# from classical_optimization import solve_power_allocation_and_get_rate
+import sys
+import os
 
-def get_brute_force_optimal_link(G_matrix, num_tx=4, num_users=5, P_max=1.0, noise_var=1e-9):
-    """
-    Duyệt toàn bộ không gian nghiệm hợp lệ (thỏa mãn constraint mỗi user max 1 link).
-    """
-    print(f"Bắt đầu Brute-force cho mạng {num_tx} Tx, {num_users} Users...")
+# Thêm thư mục cha vào đường dẫn để import các file cũ
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from qubo_mapping import run_snapshot_mapping, N_TRANS
+from classical_optimization import optimize_power_sca
+
+def run_brute_force_true_optimum(N_USERS=5, seed=42):
+    print(f"--- BẮT ĐẦU VÉT CẠN (BRUTE-FORCE) CHO {N_TRANS} TX, {N_USERS} USERS ---")
+    
+    # 1. Tạo ma trận Kênh truyền G (dùng chung seed với các file khác để công bằng)
+    G_matrix, _ = run_snapshot_mapping(N_USERS, seed=seed)
+    
     start_time = time.time()
     
-    # Mỗi user có (num_tx + 1) lựa chọn: Chọn Tx 0,1,2,3 hoặc -1 (không kết nối)
-    user_choices = list(range(-1, num_tx))
+    # 2. Tạo không gian nghiệm hợp lệ (Mỗi user chỉ nối max 1 Tx)
+    # Lựa chọn: -1 (Không nối), 0, 1, 2, 3 (Nối với Tx tương ứng)
+    user_choices = list(range(-1, N_TRANS))
+    all_combinations = list(itertools.product(user_choices, repeat=N_USERS))
+    total_cases = len(all_combinations)
     
-    # Tạo tất cả các tổ hợp hợp lệ (5^5 = 3125 trường hợp)
-    all_combinations = list(itertools.product(user_choices, repeat=num_users))
+    print(f"Tổng số trường hợp hợp lệ cần duyệt: {total_cases} (={len(user_choices)}^{N_USERS})")
     
     best_rate = 0.0
-    best_X = np.zeros((num_tx, num_users))
+    best_X_flat = None
     
-    for combo in all_combinations:
-        # Tạo ma trận nhị phân X từ tổ hợp
-        X_current = np.zeros((num_tx, num_users))
+    # 3. Duyệt toàn bộ
+    for idx, combo in enumerate(all_combinations):
+        # In tiến độ cho đỡ chán
+        if idx % 500 == 0:
+            print(f" Đang chạy... {idx}/{total_cases}")
+            
+        X_current = np.zeros((N_TRANS, N_USERS))
         for u, t in enumerate(combo):
-            if t != -1: # Nếu user u có kết nối với Tx t
+            if t != -1: # Nếu có kết nối
                 X_current[t, u] = 1
                 
-        # Bỏ qua trường hợp ma trận X toàn số 0 (không có link nào)
+        # Nếu không có link nào thì bỏ qua
         if np.sum(X_current) == 0:
             continue
             
-        # -------------------------------------------------------------------
-        # TẠI ĐÂY: Gọi hàm Power Allocation (SCA) của bạn để tính Sum Rate
-        # Ví dụ:
-        # current_rate, _, _ = solve_power_allocation_and_get_rate(X_current, G_matrix, P_max, noise_var)
-        # -------------------------------------------------------------------
+        # Chuyển X thành vector 1D vì hàm optimize_power_sca của bạn yêu cầu thế
+        x_vector = X_current.flatten()
         
-        # Dòng này tôi làm giả (Mock) để code không bị lỗi. 
-        # Khi chạy thật, bạn xóa dòng giả này và dùng hàm thật ở trên.
-        current_rate = np.random.uniform(0.5, 2.0) 
+        # Chạy Power Allocation (SCA) để lấy Sum Rate
+        _, current_rate = optimize_power_sca(G_matrix, x_vector, N_USERS)
         
         if current_rate > best_rate:
             best_rate = current_rate
-            best_X = np.copy(X_current)
-            
-    end_time = time.time()
-    print(f"Xong! Brute-force duyệt {len(all_combinations)} trường hợp mất {end_time - start_time:.2f} giây.")
-    print(f"GLOBAL OPTIMUM RATE: {best_rate:.4f} nats/s/Hz")
-    
-    return best_rate, best_X
+            best_X_flat = x_vector
 
-# Chạy test thử
+    end_time = time.time()
+    
+    print("-" * 50)
+    print(f"HOÀN THÀNH BRUTE-FORCE!")
+    print(f"Thời gian chạy: {end_time - start_time:.2f} giây")
+    print(f"TRUE GLOBAL OPTIMUM RATE: {best_rate:.5f} nats/s/Hz")
+    print(f"Ma trận Link tốt nhất (X):\n{best_X_flat.reshape(N_TRANS, N_USERS)}")
+    print("-" * 50)
+    
+    return best_rate
+
 if __name__ == "__main__":
-    # Giả lập ma trận kênh truyền 4x5
-    G_dummy = np.random.rand(4, 5) 
-    get_brute_force_optimal_link(G_dummy)
+    # Bạn hãy chạy file này, lấy được số liệu Global Optimum.
+    # Sau đó so sánh với Sum Rate 1.629 (của QIO) xem đạt bao nhiêu % nhé!
+    run_brute_force_true_optimum(N_USERS=5, seed=42)
